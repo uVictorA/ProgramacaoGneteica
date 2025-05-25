@@ -172,6 +172,7 @@ class Robo:
         self.raio = raio
         self.angulo = 0  # em radianos
         self.velocidade = 0
+        self.velocidade_max = 5  # Nova constante para velocidade máxima
         self.energia = 100
         self.recursos_coletados = 0
         self.colisoes = 0
@@ -179,6 +180,7 @@ class Robo:
         self.tempo_parado = 0  # Novo: contador de tempo parado
         self.ultima_posicao = (x, y)  # Novo: última posição conhecida
         self.meta_atingida = False  # Novo: flag para controlar se a meta foi atingida
+        self.passos_desde_coleta = 0  # Novo atributo
     
     def reset(self, x, y):
         self.x = x
@@ -192,6 +194,7 @@ class Robo:
         self.tempo_parado = 0
         self.ultima_posicao = (x, y)
         self.meta_atingida = False
+        self.passos_desde_coleta = 0  # Reset do novo atributo
     
     def mover(self, aceleracao, rotacao, ambiente):
         # Atualizar ângulo
@@ -250,114 +253,167 @@ class Robo:
             self.energia = min(100, self.energia + 20 * recursos_coletados)
         
         return self.energia <= 0
-    
-    import math
 
-def get_sensores(self, ambiente):
-    # Inicializações
-    dist_recurso = float('inf')
-    recursos_restantes = 0
-    soma_vetores_recursos_x = 0
-    soma_vetores_recursos_y = 0
-    recursos_cone_frontal_count = 0
-    
-    for recurso in ambiente.recursos:
-        if not recurso['coletado']:
-            recursos_restantes += 1
-            dx = recurso['x'] - self.x
-            dy = recurso['y'] - self.y
-            dist = math.hypot(dx, dy)
-            dist_recurso = min(dist_recurso, dist)
-            
-            # Soma vetores unitários para recursos
-            if dist > 0:
-                soma_vetores_recursos_x += dx / dist
-                soma_vetores_recursos_y += dy / dist
-                
-            # Checar se recurso está no cone frontal de ±30°
-            angulo_recurso = math.atan2(dy, dx) - self.angulo
-            # Normalizar angulo para [-pi, pi]
-            while angulo_recurso > math.pi:
-                angulo_recurso -= 2 * math.pi
-            while angulo_recurso < -math.pi:
-                angulo_recurso += 2 * math.pi
-            if abs(angulo_recurso) <= math.radians(30):
-                recursos_cone_frontal_count += 1
-    
-    # Proporção de recursos no cone frontal
-    recursos_cone_frontal = (recursos_cone_frontal_count / recursos_restantes) if recursos_restantes > 0 else 0
-
-    # Distância até obstáculo mais próximo (usar math.hypot)
-    dist_obstaculo = float('inf')
-    for obstaculo in ambiente.obstaculos:
-        centro_x = obstaculo['x'] + obstaculo['largura'] / 2
-        centro_y = obstaculo['y'] + obstaculo['altura'] / 2
-        dist = math.hypot(self.x - centro_x, self.y - centro_y)
-        dist_obstaculo = min(dist_obstaculo, dist)
+    def mover_novo(self, aceleracao, rotacao, ambiente):
+        self.velocidade += aceleracao
+        self.velocidade = max(min(self.velocidade, self.velocidade_max), -self.velocidade_max)
         
-    # Distância até a meta
-    dx_meta = ambiente.meta['x'] - self.x
-    dy_meta = ambiente.meta['y'] - self.y
-    dist_meta = math.hypot(dx_meta, dy_meta)
-    
-    # Vetor unitário direção meta
-    if dist_meta > 0:
-        direcao_meta_x = dx_meta / dist_meta
-        direcao_meta_y = dy_meta / dist_meta
-    else:
-        direcao_meta_x, direcao_meta_y = 0, 0
-    
-    # Vetor soma direção recursos (normalizado)
-    soma_magnitude = math.hypot(soma_vetores_recursos_x, soma_vetores_recursos_y)
-    if soma_magnitude > 0:
-        direcao_recursos_x = soma_vetores_recursos_x / soma_magnitude
-        direcao_recursos_y = soma_vetores_recursos_y / soma_magnitude
-    else:
-        direcao_recursos_x, direcao_recursos_y = 0, 0
-    
-    # Ângulo até recurso mais próximo
-    angulo_recurso = 0
-    if dist_recurso < float('inf'):
+        self.angulo += rotacao
+        self.energia -= abs(aceleracao) * 0.1
+        self.energia -= 0.01  # Consumo base
+
+        nova_x = self.x + self.velocidade * math.cos(self.angulo)
+        nova_y = self.y + self.velocidade * math.sin(self.angulo)
+        
+        colidiu = False
+        for obstaculo in ambiente.obstaculos:
+            # Calcular distância até o centro do obstáculo
+            centro_x = obstaculo['x'] + obstaculo['largura'] / 2
+            centro_y = obstaculo['y'] + obstaculo['altura'] / 2
+            distancia = math.hypot(nova_x - centro_x, nova_y - centro_y)
+            # Usar a maior dimensão do obstáculo como "raio"
+            raio_obstaculo = max(obstaculo['largura'], obstaculo['altura']) / 2
+            if distancia < raio_obstaculo + self.raio:
+                colidiu = True
+                break
+
+        if colidiu:
+            self.velocidade = 0
+            self.angulo += random.uniform(-math.pi/4, math.pi/4)
+            self.tempo_parado += 1
+            self.colisoes += 1
+        else:
+            self.x = nova_x
+            self.y = nova_y
+            self.tempo_parado = 0
+            self.distancia_percorrida += math.hypot(nova_x - self.x, nova_y - self.y)
+
+        if self.tempo_parado > 5:
+            self.velocidade = 0.5
+            self.angulo += random.uniform(-0.1, 0.1)
+
+        self.passos_desde_coleta += 1
+
+        # Verificar coleta de recursos
+        recursos_coletados = ambiente.verificar_coleta_recursos(self.x, self.y, self.raio)
+        if recursos_coletados > 0:
+            self.passos_desde_coleta = 0
+            self.recursos_coletados += recursos_coletados
+            self.energia = min(100, self.energia + 20 * recursos_coletados)
+
+        # Verificar se atingiu a meta
+        if not self.meta_atingida and ambiente.verificar_atingir_meta(self.x, self.y, self.raio):
+            self.meta_atingida = True
+            self.energia = min(100, self.energia + 50)
+
+        return self.energia <= 0
+
+    def get_sensores(self, ambiente):
+        # Inicializações
+        dist_recurso = float('inf')
+        recursos_restantes = 0
+        soma_vetores_recursos_x = 0
+        soma_vetores_recursos_y = 0
+        recursos_cone_frontal_count = 0
+        
         for recurso in ambiente.recursos:
             if not recurso['coletado']:
+                recursos_restantes += 1
                 dx = recurso['x'] - self.x
                 dy = recurso['y'] - self.y
-                angulo = math.atan2(dy, dx)
-                angulo_recurso = angulo - self.angulo
+                dist = math.hypot(dx, dy)
+                dist_recurso = min(dist_recurso, dist)
+                
+                # Soma vetores unitários para recursos
+                if dist > 0:
+                    soma_vetores_recursos_x += dx / dist
+                    soma_vetores_recursos_y += dy / dist
+                    
+                # Checar se recurso está no cone frontal de ±30°
+                angulo_recurso = math.atan2(dy, dx) - self.angulo
+                # Normalizar angulo para [-pi, pi]
                 while angulo_recurso > math.pi:
                     angulo_recurso -= 2 * math.pi
                 while angulo_recurso < -math.pi:
                     angulo_recurso += 2 * math.pi
-                break
-    
-    # Ângulo até a meta
-    angulo_meta = math.atan2(dy_meta, dx_meta) - self.angulo
-    while angulo_meta > math.pi:
-        angulo_meta -= 2 * math.pi
-    while angulo_meta < -math.pi:
-        angulo_meta += 2 * math.pi
-    
-    # Passos desde a última coleta (normalizado, supondo max 100 passos)
-    passos_desde_coleta_norm = min(self.passos_desde_coleta / 100, 1.0)
-    
-    return {
-        'dist_recurso': dist_recurso,
-        'dist_obstaculo': dist_obstaculo,
-        'dist_meta': dist_meta,
-        'angulo_recurso': angulo_recurso,
-        'angulo_meta': angulo_meta,
-        'energia': self.energia,
-        'velocidade': self.velocidade,
-        'meta_atingida': self.meta_atingida,
-        'tempo_parado': self.tempo_parado,
-        'recursos_restantes': recursos_restantes,
-        'direcao_meta_x': direcao_meta_x,
-        'direcao_meta_y': direcao_meta_y,
-        'direcao_recursos_x': direcao_recursos_x,
-        'direcao_recursos_y': direcao_recursos_y,
-        'recursos_cone_frontal': recursos_cone_frontal,
-        'passos_desde_coleta': passos_desde_coleta_norm
-    }
+                if abs(angulo_recurso) <= math.radians(30):
+                    recursos_cone_frontal_count += 1
+        
+        # Proporção de recursos no cone frontal
+        recursos_cone_frontal = (recursos_cone_frontal_count / recursos_restantes) if recursos_restantes > 0 else 0
+
+        # Distância até obstáculo mais próximo (usar math.hypot)
+        dist_obstaculo = float('inf')
+        for obstaculo in ambiente.obstaculos:
+            centro_x = obstaculo['x'] + obstaculo['largura'] / 2
+            centro_y = obstaculo['y'] + obstaculo['altura'] / 2
+            dist = math.hypot(self.x - centro_x, self.y - centro_y)
+            dist_obstaculo = min(dist_obstaculo, dist)
+        
+        # Distância até a meta
+        dx_meta = ambiente.meta['x'] - self.x
+        dy_meta = ambiente.meta['y'] - self.y
+        dist_meta = math.hypot(dx_meta, dy_meta)
+        
+        # Vetor unitário direção meta
+        if dist_meta > 0:
+            direcao_meta_x = dx_meta / dist_meta
+            direcao_meta_y = dy_meta / dist_meta
+        else:
+            direcao_meta_x, direcao_meta_y = 0, 0
+        
+        # Vetor soma direção recursos (normalizado)
+        soma_magnitude = math.hypot(soma_vetores_recursos_x, soma_vetores_recursos_y)
+        if soma_magnitude > 0:
+            direcao_recursos_x = soma_vetores_recursos_x / soma_magnitude
+            direcao_recursos_y = soma_vetores_recursos_y / soma_magnitude
+        else:
+            direcao_recursos_x, direcao_recursos_y = 0, 0
+        
+        # Ângulo até recurso mais próximo
+        angulo_recurso = 0
+        if dist_recurso < float('inf'):
+            for recurso in ambiente.recursos:
+                if not recurso['coletado']:
+                    dx = recurso['x'] - self.x
+                    dy = recurso['y'] - self.y
+                    angulo = math.atan2(dy, dx)
+                    angulo_recurso = angulo - self.angulo
+                    while angulo_recurso > math.pi:
+                        angulo_recurso -= 2 * math.pi
+                    while angulo_recurso < -math.pi:
+                        angulo_recurso += 2 * math.pi
+                    break
+        
+        # Ângulo até a meta
+        angulo_meta = math.atan2(dy_meta, dx_meta) - self.angulo
+        while angulo_meta > math.pi:
+            angulo_meta -= 2 * math.pi
+        while angulo_meta < -math.pi:
+            angulo_meta += 2 * math.pi
+        
+        # Passos desde a última coleta (normalizado, supondo max 100 passos)
+        passos_desde_coleta_norm = min(self.passos_desde_coleta / 100, 1.0)
+        
+        return {
+            'dist_recurso': dist_recurso,
+            'dist_obstaculo': dist_obstaculo,
+            'dist_meta': dist_meta,
+            'angulo_recurso': angulo_recurso,
+            'angulo_meta': angulo_meta,
+            'energia': self.energia,
+            'velocidade': self.velocidade,
+            'meta_atingida': self.meta_atingida,
+            'tempo_parado': self.tempo_parado,
+            'recursos_restantes': recursos_restantes,
+            'direcao_meta_x': direcao_meta_x,
+            'direcao_meta_y': direcao_meta_y,
+            'direcao_recursos_x': direcao_recursos_x,
+            'direcao_recursos_y': direcao_recursos_y,
+            'recursos_cone_frontal': recursos_cone_frontal,
+            'passos_desde_coleta': passos_desde_coleta_norm
+        }
+
 class Simulador:
     def __init__(self, ambiente, robo, individuo):
         self.ambiente = ambiente
