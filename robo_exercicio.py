@@ -105,7 +105,7 @@ class Ambiente:
         recursos_coletados = 0
         for recurso in self.recursos:
             if not recurso['coletado']:
-                distancia = np.sqrt((x - recurso['x'])**2 + (y - recurso['y'])**2)
+                distancia = math.hypot(x - recurso['x'], y - recurso['y'])
                 if distancia < raio + 10:  # 10 é o raio do recurso
                     recurso['coletado'] = True
                     recursos_coletados += 1
@@ -113,7 +113,7 @@ class Ambiente:
     
     def verificar_atingir_meta(self, x, y, raio):
         if not self.meta_atingida:
-            distancia = np.sqrt((x - self.meta['x'])**2 + (y - self.meta['y'])**2)
+            distancia = math.hypot(x - self.meta['x'], y - self.meta['y'])
             if distancia < raio + self.meta['raio']:
                 self.meta_atingida = True
                 return True
@@ -153,7 +153,7 @@ class Ambiente:
                 # Calcular a distância até o obstáculo mais próximo
                 dist_x = max(obstaculo['x'] - x, 0, x - (obstaculo['x'] + obstaculo['largura']))
                 dist_y = max(obstaculo['y'] - y, 0, y - (obstaculo['y'] + obstaculo['altura']))
-                dist = np.sqrt(dist_x**2 + dist_y**2)
+                dist = math.hypot(dist_x, dist_y)
                 
                 if dist < raio_robo + 20:  # 20 pixels de margem extra
                     posicao_segura = False
@@ -198,7 +198,7 @@ class Robo:
         self.angulo += rotacao
         
         # Verificar se o robô está parado
-        distancia_movimento = np.sqrt((self.x - self.ultima_posicao[0])**2 + (self.y - self.ultima_posicao[1])**2)
+        distancia_movimento = math.hypot(self.x - self.ultima_posicao[0], self.y - self.ultima_posicao[1])
         if distancia_movimento < 0.1:  # Se moveu menos de 0.1 unidades
             self.tempo_parado += 1
             # Forçar movimento após ficar parado por muito tempo
