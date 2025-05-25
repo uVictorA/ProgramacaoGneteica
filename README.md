@@ -1,4 +1,4 @@
-🧬 Genetic Algorithm Optimization for Robot Simulation
+🧬 Otimização de Algoritmo Genético para Simulação de Robôs
 
 
 Este repositório contém a implementação e evolução de um algoritmo genético aplicado à simulação de um robô em ambiente com obstáculos, recursos e metas. O projeto passa por uma série de melhorias funcionais e estruturais que visam aumentar a eficiência da navegação e a inteligência da tomada de decisões do agente simulado.
