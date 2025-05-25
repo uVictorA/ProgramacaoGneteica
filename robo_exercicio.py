@@ -265,7 +265,7 @@ class Robo:
             # Simplificação: considerar apenas a distância até o centro do obstáculo
             centro_x = obstaculo['x'] + obstaculo['largura'] / 2
             centro_y = obstaculo['y'] + obstaculo['altura'] / 2
-            dist = np.sqrt((self.x - centro_x)**2 + (self.y - centro_y)**2)
+            dist = math.hypot(self.x - centro_x, self.y - centro_y)
             dist_obstaculo = min(dist_obstaculo, dist)
         
         # Distância até a meta
