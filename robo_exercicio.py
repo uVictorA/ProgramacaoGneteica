@@ -224,7 +224,7 @@ class Robo:
             self.angulo += random.uniform(-np.pi/4, np.pi/4)
         else:
             # Atualizar posição
-            self.distancia_percorrida += np.sqrt((novo_x - self.x)**2 + (novo_y - self.y)**2)
+            self.distancia_percorrida += math.hypot(novo_x - self.x, novo_y - self.y)
             self.x = novo_x
             self.y = novo_y
         
@@ -270,6 +270,7 @@ class Robo:
         
         # Distância até a meta
         dist = math.hypot(self.x - centro_x, self.y - centro_y)
+
         
         # Ângulo até o recurso mais próximo
         angulo_recurso = 0
