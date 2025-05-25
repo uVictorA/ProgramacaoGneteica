@@ -5,6 +5,7 @@ import matplotlib.patches as patches
 import matplotlib.animation as animation
 import json
 import time
+import math
 
 # =====================================================================
 # PARTE 1: ESTRUTURA DA SIMULAÇÃO (NÃO MODIFICAR)
@@ -255,7 +256,7 @@ class Robo:
         dist_recurso = float('inf')
         for recurso in ambiente.recursos:
             if not recurso['coletado']:
-                dist = np.sqrt((self.x - recurso['x'])**2 + (self.y - recurso['y'])**2)
+                dist = math.hypot(self.x - recurso['x'], self.y - recurso['y'])
                 dist_recurso = min(dist_recurso, dist)
         
         # Distância até o obstáculo mais próximo
