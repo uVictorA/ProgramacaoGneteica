@@ -269,7 +269,7 @@ class Robo:
             dist_obstaculo = min(dist_obstaculo, dist)
         
         # Distância até a meta
-        dist_meta = np.sqrt((self.x - ambiente.meta['x'])**2 + (self.y - ambiente.meta['y'])**2)
+        dist = math.hypot(self.x - centro_x, self.y - centro_y)
         
         # Ângulo até o recurso mais próximo
         angulo_recurso = 0
