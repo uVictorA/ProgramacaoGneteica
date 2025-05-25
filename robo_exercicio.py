@@ -66,7 +66,7 @@ class Ambiente:
                 # Calcular a distância até o obstáculo mais próximo
                 dist_x = max(obstaculo['x'] - x, 0, x - (obstaculo['x'] + obstaculo['largura']))
                 dist_y = max(obstaculo['y'] - y, 0, y - (obstaculo['y'] + obstaculo['altura']))
-                dist = np.sqrt(dist_x**2 + dist_y**2)
+                dist = math.hypot(dist_x, dist_y)
                 
                 if dist < 50:  # 50 pixels de margem extra
                     posicao_segura = False
