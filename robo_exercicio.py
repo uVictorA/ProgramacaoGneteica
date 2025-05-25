@@ -181,6 +181,7 @@ class Robo:
         self.ultima_posicao = (x, y)  # Novo: última posição conhecida
         self.meta_atingida = False  # Novo: flag para controlar se a meta foi atingida
         self.passos_desde_coleta = 0  # Novo atributo
+        self.ambiente = None  # Novo atributo para referência ao ambiente
     
     def reset(self, x, y):
         self.x = x
@@ -413,6 +414,49 @@ class Robo:
             'recursos_cone_frontal': recursos_cone_frontal,
             'passos_desde_coleta': passos_desde_coleta_norm
         }
+
+    def get_sensores_novo(self, ambiente):
+        self.ambiente = ambiente  # Armazenar referência ao ambiente
+        sensores = {}
+        
+        # Distância normalizada até a meta
+        dx_meta = ambiente.meta['x'] - self.x
+        dy_meta = ambiente.meta['y'] - self.y
+        distancia_meta = np.hypot(dx_meta, dy_meta) / ambiente.largura
+        sensores['distancia_meta'] = distancia_meta
+        sensores['direcao_meta_x'] = dx_meta / (np.hypot(dx_meta, dy_meta) + 1e-5)
+        sensores['direcao_meta_y'] = dy_meta / (np.hypot(dx_meta, dy_meta) + 1e-5)
+
+        # Vetor de direção para recursos
+        recursos_direcao_x, recursos_direcao_y = 0, 0
+        recursos_cone_frontal = 0
+        recursos_nao_coletados = [r for r in ambiente.recursos if not r['coletado']]
+        
+        for recurso in recursos_nao_coletados:
+            dx = recurso['x'] - self.x
+            dy = recurso['y'] - self.y
+            dist = np.hypot(dx, dy)
+            recursos_direcao_x += dx / (dist + 1e-5)
+            recursos_direcao_y += dy / (dist + 1e-5)
+
+            angulo = math.atan2(dy, dx) - self.angulo
+            # Normalizar ângulo para [-pi, pi]
+            while angulo > math.pi:
+                angulo -= 2 * math.pi
+            while angulo < -math.pi:
+                angulo += 2 * math.pi
+            if abs(angulo) < math.pi / 6:  # ±30°
+                recursos_cone_frontal += 1
+
+        sensores['direcao_recursos_x'] = recursos_direcao_x
+        sensores['direcao_recursos_y'] = recursos_direcao_y
+        sensores['recursos_cone_frontal'] = recursos_cone_frontal / (len(recursos_nao_coletados) + 1e-5)
+        
+        sensores['tempo_parado'] = self.tempo_parado
+        sensores['passos_desde_coleta'] = self.passos_desde_coleta / 100.0
+        sensores['recursos_restantes'] = len(recursos_nao_coletados)
+
+        return sensores
 
 class Simulador:
     def __init__(self, ambiente, robo, individuo):
