@@ -840,23 +840,22 @@ if __name__ == "__main__":
     
     # Criar e treinar o algoritmo genético
     print("Treinando o algoritmo genético...")
-    # PARÂMETROS PARA O ALUNO MODIFICAR
-    pg = ProgramacaoGenetica(tamanho_populacao=20, profundidade=4)
-    melhor_individuo, historico = pg.evoluir(n_geracoes=5)
+    pg = ProgramacaoGenetica(
+        tamanho_populacao=50,
+        profundidade=4,
+        metodo_selecao='roleta',
+        elite_size=0.1
+    )
+    # aqui desempacotamos corretamente o retorno
+    melhor_individuo, historico = pg.evoluir(n_geracoes=50)
     
     # Salvar o melhor indivíduo
     print("Salvando o melhor indivíduo...")
     melhor_individuo.salvar('melhor_robo.json')
     
-    # Plotar evolução do fitness
-    print("Plotando evolução do fitness...")
-    plt.figure(figsize=(10, 5))
-    plt.plot(historico)
-    plt.title('Evolução do Fitness')
-    plt.xlabel('Geração')
-    plt.ylabel('Fitness')
-    plt.savefig('evolucao_fitness_robo.png')
-    plt.close()
+    # Plotar estatísticas de evolução (melhor, média±desvio e diversidade)
+    print("Plotando estatísticas de evolução...")
+    pg.plotar_estatisticas('estatisticas_evolucao.png')
     
     # Simular o melhor indivíduo
     print("Simulando o melhor indivíduo...")
@@ -865,6 +864,7 @@ if __name__ == "__main__":
     simulador = Simulador(ambiente, robo, melhor_individuo)
     
     print("Executando simulação em tempo real...")
-    print("A simulação será exibida em uma janela separada.")
     print("Pressione Ctrl+C para fechar a janela quando desejar.")
-    simulador.simular() 
+    simulador.simular()
+    simulador.animar()
+
