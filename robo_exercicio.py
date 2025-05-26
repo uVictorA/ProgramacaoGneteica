@@ -689,51 +689,98 @@ class IndividuoPG:
     def __init__(self, profundidade=3):
         self.profundidade = profundidade
         self.arvore_aceleracao = self.criar_arvore_aleatoria()
-        self.arvore_rotacao = self.criar_arvore_aleatoria()
-        self.fitness = 0
+        self.arvore_rotacao    = self.criar_arvore_aleatoria()
+        self.fitness           = 0
     
     def criar_arvore_aleatoria(self):
         if self.profundidade == 0:
             return self.criar_folha()
-        
-        # OPERADORES DISPONÍVEIS PARA O ALUNO MODIFICAR
-        operador = random.choice(['+', '-', '*', '/', 'max', 'min', 'abs', 'if_positivo', 'if_negativo'])
-        if operador in ['+', '-', '*', '/']:
+
+        operador = random.choice([
+            '+', '-', '*', '/',
+            'max', 'min', 'abs',
+            'if_positivo', 'if_negativo',
+            'and', 'or', 'not',
+            'if_then_else','goto_meta'
+        ])
+
+        # Para binários simples e max/min
+        if operador in ['+', '-', '*', '/', 'max', 'min', 'and', 'or']:
+            esquerda = IndividuoPG(self.profundidade - 1).arvore_aceleracao
+            direita = IndividuoPG(self.profundidade - 1).arvore_aceleracao
             return {
                 'tipo': 'operador',
                 'operador': operador,
-                'esquerda': IndividuoPG(self.profundidade - 1).arvore_aceleracao,
-                'direita': IndividuoPG(self.profundidade - 1).arvore_aceleracao
+                'esquerda': esquerda,
+                'direita': direita
             }
-        elif operador in ['max', 'min']:
-            return {
-                'tipo': 'operador',
-                'operador': operador,
-                'esquerda': IndividuoPG(self.profundidade - 1).arvore_aceleracao,
-                'direita': IndividuoPG(self.profundidade - 1).arvore_aceleracao
-            }
-        elif operador == 'abs':
+
+        # Para unário abs e not
+        if operador in ['abs', 'not']:
             return {
                 'tipo': 'operador',
                 'operador': operador,
                 'esquerda': IndividuoPG(self.profundidade - 1).arvore_aceleracao,
                 'direita': None
             }
-        else:  # if_positivo ou if_negativo
+
+        # Para if_positivo e if_negativo
+        if operador in ['if_positivo', 'if_negativo']:
             return {
                 'tipo': 'operador',
                 'operador': operador,
                 'esquerda': IndividuoPG(self.profundidade - 1).arvore_aceleracao,
                 'direita': IndividuoPG(self.profundidade - 1).arvore_aceleracao
             }
+
+        # Para o ternário if_then_else
+        if operador == 'if_then_else':
+            cond = IndividuoPG(self.profundidade - 1).arvore_aceleracao
+            then_branch = IndividuoPG(self.profundidade - 1).arvore_aceleracao
+            else_branch = IndividuoPG(self.profundidade - 1).arvore_aceleracao
+            return {
+                'tipo': 'operador',
+                'operador': 'if_then_else',
+                'esquerda': cond,
+                'direita': {
+                    'then': then_branch,
+                    'else': else_branch
+                }
+            }
+            
+        if operador == 'goto_meta':
+            # Nós filhos (podem ser ignorados ou usados para afinar intensidade)
+            cond = {'tipo':'folha', 'variavel':'recursos_restantes'}
+            coleta_sub = IndividuoPG(self.profundidade-1).criar_arvore_aleatoria()
+            goto_sub   = {
+                'tipo': 'operador',
+                'operador': 'goto_meta',
+                'esquerda': IndividuoPG(self.profundidade-1).criar_arvore_aleatoria(),
+                'direita':  IndividuoPG(self.profundidade-1).criar_arvore_aleatoria()
+            }
+            return {
+                'tipo': 'operador',
+                'operador': 'if_then_else',
+                'esquerda': cond,
+                'direita': {
+                    'then': coleta_sub,  # enquanto recursos_restantes > 0
+                    'else': goto_sub     # quando recursos_restantes == 0
+                }
+            }
     
     def criar_folha(self):
-        # VARIÁVEIS DISPONÍVEIS PARA O ALUNO MODIFICAR
-        tipo = random.choice(['constante', 'dist_recurso', 'dist_obstaculo', 'dist_meta', 'angulo_recurso', 'angulo_meta', 'energia', 'velocidade', 'meta_atingida'])
+        tipo = random.choice([
+            'constante',
+            'dist_recurso', 'dist_obstaculo', 'dist_meta',
+            'angulo_recurso', 'angulo_meta',
+            'energia', 'velocidade', 'meta_atingida',
+            'tempo_parado', 'recursos_restantes',     # adicionadas
+            'direcao_meta_x', 'direcao_meta_y'        # adicionadas
+        ])
         if tipo == 'constante':
             return {
                 'tipo': 'folha',
-                'valor': random.uniform(-5, 5)  # VALOR ALEATÓRIO PARA O ALUNO MODIFICAR
+                'valor': random.uniform(-5, 5)
             }
         else:
             return {
@@ -742,82 +789,206 @@ class IndividuoPG:
             }
     
     def avaliar(self, sensores, tipo='aceleracao'):
+        # escolhe qual árvore usar
         arvore = self.arvore_aceleracao if tipo == 'aceleracao' else self.arvore_rotacao
         return self.avaliar_no(arvore, sensores)
     
     def avaliar_no(self, no, sensores):
-        if no is None:
+        # caso base
+        if no is None or not isinstance(no, dict) or 'tipo' not in no:
             return 0
-            
+
+        # folha
         if no['tipo'] == 'folha':
             if 'valor' in no:
                 return no['valor']
-            elif 'variavel' in no:
-                return sensores[no['variavel']]
-        
-        if no['operador'] == 'abs':
-            return abs(self.avaliar_no(no['esquerda'], sensores))
-        elif no['operador'] == 'if_positivo':
-            valor = self.avaliar_no(no['esquerda'], sensores)
-            if valor > 0:
-                return self.avaliar_no(no['direita'], sensores)
+            return sensores[no['variavel']]
+
+        op = no.get('operador')
+
+        # ── if_then_else ──
+        if op == 'if_then_else':
+            raw = self.avaliar_no(no['esquerda'], sensores)
+            cond = raw[0] if isinstance(raw, tuple) else raw
+            ramo = no['direita']['then'] if cond > 0 else no['direita']['else']
+            return self.avaliar_no(ramo, sensores)
+
+        # ── goto_meta ──
+        if op == 'goto_meta':
+            # direção unitária até a meta (em x)
+            dx = sensores['direcao_meta_x']
+            # ângulo até a meta
+            ang_meta = sensores['angulo_meta']
+
+            # (opcional) usar os filhos como intensidades
+            scale_a = (
+                no['esquerda']['valor']
+                if isinstance(no.get('esquerda'), dict) and 'valor' in no['esquerda']
+                else 1.0
+            )
+            scale_r = (
+                no['direita']['valor']
+                if isinstance(no.get('direita'), dict) and 'valor' in no['direita']
+                else 1.0
+            )
+
+            acel = dx * scale_a
+            rot  = ang_meta * scale_r
+            return (acel, rot)
+
+        # ── unários ──
+        if op == 'abs':
+            raw = self.avaliar_no(no['esquerda'], sensores)
+            v = raw[0] if isinstance(raw, tuple) else raw
+            return abs(v)
+
+        if op == 'not':
+            raw = self.avaliar_no(no['esquerda'], sensores)
+            v = raw[0] if isinstance(raw, tuple) else raw
+            return float(not bool(v))
+
+        # ── condicionais simples ──
+        if op in ('if_positivo', 'if_negativo'):
+            raw = self.avaliar_no(no['esquerda'], sensores)
+            v = raw[0] if isinstance(raw, tuple) else raw
+            if op == 'if_positivo':
+                return self.avaliar_no(no['direita'], sensores) if v > 0 else 0
             else:
-                return 0
-        elif no['operador'] == 'if_negativo':
-            valor = self.avaliar_no(no['esquerda'], sensores)
-            if valor < 0:
-                return self.avaliar_no(no['direita'], sensores)
-            else:
-                return 0
-        
+                return self.avaliar_no(no['direita'], sensores) if v < 0 else 0
+
+        # ── binários ──
         esquerda = self.avaliar_no(no['esquerda'], sensores)
-        direita = self.avaliar_no(no['direita'], sensores) if no['direita'] is not None else 0
-        
-        if no['operador'] == '+':
+        direita = self.avaliar_no(no['direita'], sensores) if no.get('direita') is not None else 0
+
+        if isinstance(esquerda, tuple):
+            esquerda = esquerda[0]
+        if isinstance(direita, tuple):
+            direita = direita[0]
+
+        if op == '+':
             return esquerda + direita
-        elif no['operador'] == '-':
+        if op == '-':
             return esquerda - direita
-        elif no['operador'] == '*':
+        if op == '*':
             return esquerda * direita
-        elif no['operador'] == '/':
+        if op == '/':
             return esquerda / direita if direita != 0 else 0
-        elif no['operador'] == 'max':
+        if op == 'max':
             return max(esquerda, direita)
-        else:  # min
+        if op == 'min':
             return min(esquerda, direita)
-    
+        if op == 'and':
+            return float(bool(esquerda) and bool(direita))
+        if op == 'or':
+            return float(bool(esquerda) or bool(direita))
+
+        # fallback
+        return 0
+       
+   
     def mutacao(self, probabilidade=0.1):
         # PROBABILIDADE DE MUTAÇÃO PARA O ALUNO MODIFICAR
         self.mutacao_no(self.arvore_aceleracao, probabilidade)
         self.mutacao_no(self.arvore_rotacao, probabilidade)
     
     def mutacao_no(self, no, probabilidade):
+        # 0) se não houver nó, nada a fazer
+        if no is None:
+            return
+
+        # 1) mutação do próprio nó
         if random.random() < probabilidade:
-            if no['tipo'] == 'folha':
+            # se for folha, altera valor ou variável
+            if no.get('tipo') == 'folha':
                 if 'valor' in no:
-                    no['valor'] = random.uniform(-5, 5)  # VALOR ALEATÓRIO PARA O ALUNO MODIFICAR
-                elif 'variavel' in no:
-                    no['variavel'] = random.choice(['dist_recurso', 'dist_obstaculo', 'dist_meta', 'angulo_recurso', 'angulo_meta', 'energia', 'velocidade', 'meta_atingida'])
+                    no['valor'] = random.uniform(-5, 5)
+                else:
+                    no['variavel'] = random.choice([
+                        'dist_recurso', 'dist_obstaculo', 'dist_meta',
+                        'angulo_recurso', 'angulo_meta',
+                        'energia', 'velocidade', 'meta_atingida',
+                        'tempo_parado', 'recursos_restantes',
+                        'direcao_meta_x', 'direcao_meta_y'
+                    ])
+            # se for operador simples, troca operador
+            elif no.get('tipo') == 'operador':
+                no['operador'] = random.choice([
+                    '+', '-', '*', '/', 'max', 'min',
+                    'abs', 'if_positivo', 'if_negativo'
+                ])
+
+        # 2) recursão apenas se for operador
+        if no.get('tipo') == 'operador':
+            # caso especial: if_then_else tem ramo then/else
+            if no['operador'] == 'if_then_else':
+                self.mutacao_no(no['esquerda'], probabilidade)
+                self.mutacao_no(no['direita']['then'], probabilidade)
+                self.mutacao_no(no['direita']['else'], probabilidade)
             else:
-                no['operador'] = random.choice(['+', '-', '*', '/', 'max', 'min', 'abs', 'if_positivo', 'if_negativo'])
-        
-        if no['tipo'] == 'operador':
-            self.mutacao_no(no['esquerda'], probabilidade)
-            if no['direita'] is not None:
-                self.mutacao_no(no['direita'], probabilidade)
+                # operadores unários (abs, not) ou binários comuns
+                self.mutacao_no(no.get('esquerda'), probabilidade)
+                # para unário, direita será None; para goto_meta/binaries, pode haver
+                if no.get('direita') is not None:
+                    self.mutacao_no(no.get('direita'), probabilidade)
     
     def crossover(self, outro):
-        novo = IndividuoPG(self.profundidade)
-        novo.arvore_aceleracao = self.crossover_no(self.arvore_aceleracao, outro.arvore_aceleracao)
-        novo.arvore_rotacao = self.crossover_no(self.arvore_rotacao, outro.arvore_rotacao)
-        return novo
+        filho = IndividuoPG(self.profundidade)
+        # faz subtree crossover em aceleração e rotação
+        filho.arvore_aceleracao = self.crossover_no(self.arvore_aceleracao, outro.arvore_aceleracao)
+        filho.arvore_rotacao    = self.crossover_no(self.arvore_rotacao,    outro.arvore_rotacao)
+        return filho
     
-    def crossover_no(self, no1, no2):
-        # PROBABILIDADE DE CROSSOVER PARA O ALUNO MODIFICAR
-        if random.random() < 0.5:
-            return no1.copy()
-        else:
-            return no2.copy()
+    def crossover_no(self, no1, no2, p_corte: float = 0.1):
+        """
+        Faz crossover entre duas subárvores no1 e no2:
+        1) Com probabilidade p_corte, copia no2 inteiro;
+        2) Se qualquer um não for um nó operador válido, devolve cópia de no1 (leaf);
+        3) Caso contrário, despacha para unários, ternário ou binários.
+        """
+        # 1) troca inteira de subárvore
+        if random.random() < p_corte:
+            return copy.deepcopy(no2)
+
+        # 2) se não for nó operador (ou faltar campos), devolve leaf de no1
+        if not (isinstance(no1, dict) and no1.get('tipo') == 'operador'):
+            return copy.deepcopy(no1)
+        if not (isinstance(no2, dict) and no2.get('tipo') == 'operador'):
+            return copy.deepcopy(no1)
+
+        op = no1['operador']
+
+        # 3) operadores unários
+        if op in ('abs', 'not'):
+            return {
+                'tipo': 'operador',
+                'operador': op,
+                'esquerda':   self.crossover_no(no1.get('esquerda'), no2.get('esquerda'), p_corte),
+                'direita':    None
+            }
+
+        # 4) ternário if_then_else
+        if op == 'if_then_else':
+            # extrai com segurança os ramos de no2
+            b2 = no2.get('direita') or {}
+            then2 = b2.get('then')
+            else2 = b2.get('else')
+            return {
+                'tipo': 'operador',
+                'operador': 'if_then_else',
+                'esquerda': self.crossover_no(no1.get('esquerda'), no2.get('esquerda'), p_corte),
+                'direita':  {
+                    'then': self.crossover_no(no1['direita']['then'], then2, p_corte),
+                    'else': self.crossover_no(no1['direita']['else'], else2, p_corte)
+                }
+            }
+
+        # 5) binários comuns (+, -, *, /, max, min, and, or, if_positivo, if_negativo, goto_meta)
+        return {
+            'tipo': 'operador',
+            'operador': op,
+            'esquerda':  self.crossover_no(no1.get('esquerda'), no2.get('esquerda'), p_corte),
+            'direita':   self.crossover_no(no1.get('direita'),  no2.get('direita'),  p_corte)
+        }
     
     def salvar(self, arquivo):
         with open(arquivo, 'w') as f:
