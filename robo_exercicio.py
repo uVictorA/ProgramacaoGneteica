@@ -271,207 +271,88 @@ class Robo:
             self.energia = min(100, self.energia + 20 * coletados_agora)
 
         return self.energia <= 0
+
     
-    def mover_novo(self, aceleracao, rotacao, ambiente):
-        self.velocidade += aceleracao
-        self.velocidade = max(min(self.velocidade, self.velocidade_max), -self.velocidade_max)
-        
-        self.angulo += rotacao
-        self.energia -= abs(aceleracao) * 0.1
-        self.energia -= 0.01  # Consumo base
-
-        nova_x = self.x + self.velocidade * math.cos(self.angulo)
-        nova_y = self.y + self.velocidade * math.sin(self.angulo)
-        
-        colidiu = False
-        for obstaculo in ambiente.obstaculos:
-            # Calcular distância até o centro do obstáculo
-            centro_x = obstaculo['x'] + obstaculo['largura'] / 2
-            centro_y = obstaculo['y'] + obstaculo['altura'] / 2
-            distancia = math.hypot(nova_x - centro_x, nova_y - centro_y)
-            # Usar a maior dimensão do obstáculo como "raio"
-            raio_obstaculo = max(obstaculo['largura'], obstaculo['altura']) / 2
-            if distancia < raio_obstaculo + self.raio:
-                colidiu = True
-                break
-
-        if colidiu:
-            self.velocidade = 0
-            self.angulo += random.uniform(-math.pi/4, math.pi/4)
-            self.tempo_parado += 1
-            self.colisoes += 1
-        else:
-            self.x = nova_x
-            self.y = nova_y
-            self.tempo_parado = 0
-            self.distancia_percorrida += math.hypot(nova_x - self.x, nova_y - self.y)
-
-        if self.tempo_parado > 5:
-            self.velocidade = 0.5
-            self.angulo += random.uniform(-0.1, 0.1)
-
-        self.passos_desde_coleta += 1
-
-        # Verificar coleta de recursos
-        recursos_coletados = ambiente.verificar_coleta_recursos(self.x, self.y, self.raio)
-        if recursos_coletados > 0:
-            self.passos_desde_coleta = 0
-            self.recursos_coletados += recursos_coletados
-            self.energia = min(100, self.energia + 20 * recursos_coletados)
-
-        # Verificar se atingiu a meta
-        if not self.meta_atingida and ambiente.verificar_atingir_meta(self.x, self.y, self.raio):
-            self.meta_atingida = True
-            self.energia = min(100, self.energia + 50)
-
-        return self.energia <= 0
-
     def get_sensores(self, ambiente):
-        # Inicializações
+        # recurso mais próximo
         dist_recurso = float('inf')
-        recursos_restantes = 0
-        soma_vetores_recursos_x = 0
-        soma_vetores_recursos_y = 0
-        recursos_cone_frontal_count = 0
-        
-        for recurso in ambiente.recursos:
-            if not recurso['coletado']:
-                recursos_restantes += 1
-                dx = recurso['x'] - self.x
-                dy = recurso['y'] - self.y
-                dist = math.hypot(dx, dy)
-                dist_recurso = min(dist_recurso, dist)
-                
-                # Soma vetores unitários para recursos
-                if dist > 0:
-                    soma_vetores_recursos_x += dx / dist
-                    soma_vetores_recursos_y += dy / dist
-                    
-                # Checar se recurso está no cone frontal de ±30°
-                angulo_recurso = math.atan2(dy, dx) - self.angulo
-                # Normalizar angulo para [-pi, pi]
-                while angulo_recurso > math.pi:
-                    angulo_recurso -= 2 * math.pi
-                while angulo_recurso < -math.pi:
-                    angulo_recurso += 2 * math.pi
-                if abs(angulo_recurso) <= math.radians(30):
-                    recursos_cone_frontal_count += 1
-        
-        # Proporção de recursos no cone frontal
-        recursos_cone_frontal = (recursos_cone_frontal_count / recursos_restantes) if recursos_restantes > 0 else 0
+        rec_prox = None
+        for r in ambiente.recursos:
+            if not r['coletado']:
+                d = np.hypot(self.x - r['x'], self.y - r['y'])
+                if d < dist_recurso:
+                    dist_recurso, rec_prox = d, r
 
-        # Distância até obstáculo mais próximo (usar math.hypot)
-        dist_obstaculo = float('inf')
-        for obstaculo in ambiente.obstaculos:
-            centro_x = obstaculo['x'] + obstaculo['largura'] / 2
-            centro_y = obstaculo['y'] + obstaculo['altura'] / 2
-            dist = math.hypot(self.x - centro_x, self.y - centro_y)
-            dist_obstaculo = min(dist_obstaculo, dist)
-        
-        # Distância até a meta
-        dx_meta = ambiente.meta['x'] - self.x
-        dy_meta = ambiente.meta['y'] - self.y
-        dist_meta = math.hypot(dx_meta, dy_meta)
-        
-        # Vetor unitário direção meta
-        if dist_meta > 0:
-            direcao_meta_x = dx_meta / dist_meta
-            direcao_meta_y = dy_meta / dist_meta
+        # obstáculo mais próximo
+        dist_obst = float('inf')
+        for o in ambiente.obstaculos:
+            cx = o['x'] + o['largura']/2
+            cy = o['y'] + o['altura']/2
+            dist_obst = min(dist_obst, np.hypot(self.x - cx, self.y - cy))
+
+        # meta
+        dist_meta = np.hypot(self.x - ambiente.meta['x'], self.y - ambiente.meta['y'])
+
+        # ângulos
+        if rec_prox:
+            dx, dy = rec_prox['x'] - self.x, rec_prox['y'] - self.y
+            ang_rec = math.atan2(dy, dx) - self.angulo
         else:
-            direcao_meta_x, direcao_meta_y = 0, 0
-        
-        # Vetor soma direção recursos (normalizado)
-        soma_magnitude = math.hypot(soma_vetores_recursos_x, soma_vetores_recursos_y)
-        if soma_magnitude > 0:
-            direcao_recursos_x = soma_vetores_recursos_x / soma_magnitude
-            direcao_recursos_y = soma_vetores_recursos_y / soma_magnitude
-        else:
-            direcao_recursos_x, direcao_recursos_y = 0, 0
-        
-        # Ângulo até recurso mais próximo
-        angulo_recurso = 0
-        if dist_recurso < float('inf'):
-            for recurso in ambiente.recursos:
-                if not recurso['coletado']:
-                    dx = recurso['x'] - self.x
-                    dy = recurso['y'] - self.y
-                    angulo = math.atan2(dy, dx)
-                    angulo_recurso = angulo - self.angulo
-                    while angulo_recurso > math.pi:
-                        angulo_recurso -= 2 * math.pi
-                    while angulo_recurso < -math.pi:
-                        angulo_recurso += 2 * math.pi
-                    break
-        
-        # Ângulo até a meta
-        angulo_meta = math.atan2(dy_meta, dx_meta) - self.angulo
-        while angulo_meta > math.pi:
-            angulo_meta -= 2 * math.pi
-        while angulo_meta < -math.pi:
-            angulo_meta += 2 * math.pi
-        
-        # Passos desde a última coleta (normalizado, supondo max 100 passos)
-        passos_desde_coleta_norm = min(self.passos_desde_coleta / 100, 1.0)
-        
-        return {
-            'dist_recurso': dist_recurso,
-            'dist_obstaculo': dist_obstaculo,
-            'dist_meta': dist_meta,
-            'angulo_recurso': angulo_recurso,
-            'angulo_meta': angulo_meta,
-            'energia': self.energia,
-            'velocidade': self.velocidade,
-            'meta_atingida': self.meta_atingida,
-            'tempo_parado': self.tempo_parado,
-            'recursos_restantes': recursos_restantes,
-            'direcao_meta_x': direcao_meta_x,
-            'direcao_meta_y': direcao_meta_y,
-            'direcao_recursos_x': direcao_recursos_x,
-            'direcao_recursos_y': direcao_recursos_y,
-            'recursos_cone_frontal': recursos_cone_frontal,
-            'passos_desde_coleta': passos_desde_coleta_norm
+            ang_rec = 0.0
+        ang_rec = (ang_rec + math.pi) % (2*math.pi) - math.pi
+
+        dxm = ambiente.meta['x'] - self.x
+        dym = ambiente.meta['y'] - self.y
+        ang_meta = math.atan2(dym, dxm) - self.angulo
+        ang_meta = (ang_meta + math.pi) % (2*math.pi) - math.pi
+
+        recursos_rest = sum(1 for r in ambiente.recursos if not r['coletado'])
+
+        # vetor unitário direção à meta
+        norm_m = np.hypot(dxm, dym) or 1.0
+        dir_meta_x = dxm / norm_m
+        dir_meta_y = dym / norm_m
+
+        sensores = {
+            'dist_recurso':        dist_recurso,
+            'dist_obstaculo':      dist_obst,
+            'dist_meta':           dist_meta,
+            'angulo_recurso':      ang_rec,
+            'angulo_meta':         ang_meta,
+            'energia':             self.energia,
+            'velocidade':          self.velocidade,
+            'meta_atingida':       float(self.meta_atingida),
+            'tempo_parado':        self.tempo_parado,
+            'recursos_restantes':  recursos_rest,
+            'direcao_meta_x':      dir_meta_x,
+            'direcao_meta_y':      dir_meta_y,
         }
 
-    def get_sensores_novo(self, ambiente):
-        self.ambiente = ambiente  # Armazenar referência ao ambiente
-        sensores = {}
-        
-        # Distância normalizada até a meta
-        dx_meta = ambiente.meta['x'] - self.x
-        dy_meta = ambiente.meta['y'] - self.y
-        distancia_meta = np.hypot(dx_meta, dy_meta) / ambiente.largura
-        sensores['distancia_meta'] = distancia_meta
-        sensores['direcao_meta_x'] = dx_meta / (np.hypot(dx_meta, dy_meta) + 1e-5)
-        sensores['direcao_meta_y'] = dy_meta / (np.hypot(dx_meta, dy_meta) + 1e-5)
+        # 1) Soma de vetores direção a todos os recursos não coletados
+        sum_dx, sum_dy = 0.0, 0.0
+        for r in ambiente.recursos:
+            if not r['coletado']:
+                dx, dy = r['x'] - self.x, r['y'] - self.y
+                dist = np.hypot(dx, dy) or 1.0
+                sum_dx += dx / dist
+                sum_dy += dy / dist
+        mag = np.hypot(sum_dx, sum_dy) or 1.0
+        sensores['direcao_recursos_x'] = sum_dx / mag
+        sensores['direcao_recursos_y'] = sum_dy / mag
 
-        # Vetor de direção para recursos
-        recursos_direcao_x, recursos_direcao_y = 0, 0
-        recursos_cone_frontal = 0
-        recursos_nao_coletados = [r for r in ambiente.recursos if not r['coletado']]
-        
-        for recurso in recursos_nao_coletados:
-            dx = recurso['x'] - self.x
-            dy = recurso['y'] - self.y
-            dist = np.hypot(dx, dy)
-            recursos_direcao_x += dx / (dist + 1e-5)
-            recursos_direcao_y += dy / (dist + 1e-5)
+        # 2) Contagem de recursos dentro de um cone frontal ±30°
+        count_cone = 0
+        for r in ambiente.recursos:
+            if not r['coletado']:
+                dx, dy = r['x'] - self.x, r['y'] - self.y
+                ang = math.atan2(dy, dx) - self.angulo
+                ang = (ang + math.pi) % (2*math.pi) - math.pi
+                if abs(ang) <= math.radians(30):
+                    count_cone += 1
+        sensores['recursos_cone_frontal'] = count_cone / max(1, len(ambiente.recursos))
 
-            angulo = math.atan2(dy, dx) - self.angulo
-            # Normalizar ângulo para [-pi, pi]
-            while angulo > math.pi:
-                angulo -= 2 * math.pi
-            while angulo < -math.pi:
-                angulo += 2 * math.pi
-            if abs(angulo) < math.pi / 6:  # ±30°
-                recursos_cone_frontal += 1
-
-        sensores['direcao_recursos_x'] = recursos_direcao_x
-        sensores['direcao_recursos_y'] = recursos_direcao_y
-        sensores['recursos_cone_frontal'] = recursos_cone_frontal / (len(recursos_nao_coletados) + 1e-5)
-        
-        sensores['tempo_parado'] = self.tempo_parado
-        sensores['passos_desde_coleta'] = self.passos_desde_coleta / 100.0
-        sensores['recursos_restantes'] = len(recursos_nao_coletados)
+        # 3) Passos desde a última coleta (normalizado pelo tempo máximo)
+        sensores['passos_desde_coleta'] = self.passos_desde_coleta / ambiente.max_tempo
 
         return sensores
 
@@ -481,10 +362,9 @@ class Simulador:
         self.robo = robo
         self.individuo = individuo
         self.frames = []
-        
-        # Configurar matplotlib para melhor visualização
-        plt.style.use('default')  # Usar estilo padrão
-        plt.ion()  # Modo interativo
+
+        plt.style.use('default')
+        plt.ion()
         self.fig, self.ax = plt.subplots(figsize=(12, 8))
         self.ax.set_xlim(0, ambiente.largura)
         self.ax.set_ylim(0, ambiente.altura)
@@ -499,8 +379,8 @@ class Simulador:
         x_inicial, y_inicial = self.ambiente.posicao_segura(self.robo.raio)
         self.robo.reset(x_inicial, y_inicial)
         self.frames = []
-        
-        # Limpar a figura atual
+
+        # Configurações iniciais da figura
         self.ax.clear()
         self.ax.set_xlim(0, self.ambiente.largura)
         self.ax.set_ylim(0, self.ambiente.altura)
@@ -508,84 +388,67 @@ class Simulador:
         self.ax.set_xlabel("X", fontsize=12)
         self.ax.set_ylabel("Y", fontsize=12)
         self.ax.grid(True, linestyle='--', alpha=0.7)
-        
-        # Desenhar obstáculos (estáticos)
-        for obstaculo in self.ambiente.obstaculos:
-            rect = patches.Rectangle(
-                (obstaculo['x'], obstaculo['y']),
-                obstaculo['largura'],
-                obstaculo['altura'],
-                linewidth=1,
-                edgecolor='black',
-                facecolor='#FF9999',  # Vermelho claro
-                alpha=0.7
-            )
-            self.ax.add_patch(rect)
-        
-        # Desenhar recursos (estáticos)
-        for recurso in self.ambiente.recursos:
-            if not recurso['coletado']:
-                circ = patches.Circle(
-                    (recurso['x'], recurso['y']),
-                    10,
-                    linewidth=1,
-                    edgecolor='black',
-                    facecolor='#99FF99',  # Verde claro
-                    alpha=0.8
-                )
-                self.ax.add_patch(circ)
-        
-        # Desenhar a meta
-        meta_circ = patches.Circle(
+
+        # Desenhar estáticos
+        for obst in self.ambiente.obstaculos:
+            self.ax.add_patch(patches.Rectangle(
+                (obst['x'], obst['y']),
+                obst['largura'], obst['altura'],
+                linewidth=1, edgecolor='black', facecolor='#FF9999', alpha=0.7
+            ))
+        for rec in self.ambiente.recursos:
+            if not rec['coletado']:
+                self.ax.add_patch(patches.Circle(
+                    (rec['x'], rec['y']), 10,
+                    linewidth=1, edgecolor='black', facecolor='#99FF99', alpha=0.8
+                ))
+        self.ax.add_patch(patches.Circle(
             (self.ambiente.meta['x'], self.ambiente.meta['y']),
             self.ambiente.meta['raio'],
-            linewidth=2,
-            edgecolor='black',
-            facecolor='#FFFF00',  # Amarelo
-            alpha=0.8
-        )
-        self.ax.add_patch(meta_circ)
-        
-        # Criar objetos para o robô e direção (serão atualizados)
+            linewidth=2, edgecolor='black', facecolor='#FFFF00', alpha=0.8
+        ))
+
+        # Patch inicial do robô e texto de info
         robo_circ = patches.Circle(
-            (self.robo.x, self.robo.y),
-            self.robo.raio,
-            linewidth=1,
-            edgecolor='black',
-            facecolor='#9999FF',  # Azul claro
-            alpha=0.8
+            (self.robo.x, self.robo.y), self.robo.raio,
+            linewidth=1, edgecolor='black', facecolor='#9999FF', alpha=0.8
         )
         self.ax.add_patch(robo_circ)
-        
-        # Criar texto para informações
         info_text = self.ax.text(
-            10, self.ambiente.altura - 50,  # Alterado de 10 para 50 para descer a legenda
-            "",
+            10, self.ambiente.altura - 50, "",
             fontsize=12,
             bbox=dict(facecolor='white', alpha=0.8, edgecolor='gray', boxstyle='round,pad=0.5')
         )
-        
-        # Atualizar a figura
+
         plt.draw()
         plt.pause(0.01)
-        
+
         try:
             while True:
-                # Obter sensores
+                # === SENSORING e CONTROLE ===
                 sensores = self.robo.get_sensores(self.ambiente)
-                
-                # Avaliar árvores de decisão
-                aceleracao = self.individuo.avaliar(sensores, 'aceleracao')
-                rotacao = self.individuo.avaliar(sensores, 'rotacao')
-                
-                # Limitar valores
+
+                if sensores['recursos_restantes'] == 0:
+                    # força retorno à meta
+                    aceleracao = sensores['direcao_meta_x']
+                    rotacao    = sensores['angulo_meta']
+                else:
+                    # uso normal da árvore genética
+                    resultado = self.individuo.avaliar(sensores, 'aceleracao')
+                    if isinstance(resultado, tuple):
+                        aceleracao, rotacao = resultado
+                    else:
+                        aceleracao = resultado
+                        rotacao    = self.individuo.avaliar(sensores, 'rotacao')
+
+                # Normalização dos comandos
                 aceleracao = max(-1, min(1, aceleracao))
-                rotacao = max(-0.5, min(0.5, rotacao))
-                
-                # Mover robô
+                rotacao    = max(-0.5, min(0.5, rotacao))
+
+                # Mover robô e verificar fim por energia
                 sem_energia = self.robo.mover(aceleracao, rotacao, self.ambiente)
-                
-                # Atualizar visualização em tempo real
+
+                # === ATUALIZA VISUALIZAÇÃO ===
                 self.ax.clear()
                 self.ax.set_xlim(0, self.ambiente.largura)
                 self.ax.set_ylim(0, self.ambiente.altura)
@@ -593,63 +456,39 @@ class Simulador:
                 self.ax.set_xlabel("X", fontsize=12)
                 self.ax.set_ylabel("Y", fontsize=12)
                 self.ax.grid(True, linestyle='--', alpha=0.7)
-                
-                # Desenhar obstáculos
-                for obstaculo in self.ambiente.obstaculos:
-                    rect = patches.Rectangle(
-                        (obstaculo['x'], obstaculo['y']),
-                        obstaculo['largura'],
-                        obstaculo['altura'],
-                        linewidth=1,
-                        edgecolor='black',
-                        facecolor='#FF9999',
-                        alpha=0.7
-                    )
-                    self.ax.add_patch(rect)
-                
-                # Desenhar recursos
-                for recurso in self.ambiente.recursos:
-                    if not recurso['coletado']:
-                        circ = patches.Circle(
-                            (recurso['x'], recurso['y']),
-                            10,
-                            linewidth=1,
-                            edgecolor='black',
-                            facecolor='#99FF99',
-                            alpha=0.8
-                        )
-                        self.ax.add_patch(circ)
-                
-                # Desenhar a meta
-                meta_circ = patches.Circle(
+
+                # Desenhar estáticos novamente
+                for obst in self.ambiente.obstaculos:
+                    self.ax.add_patch(patches.Rectangle(
+                        (obst['x'], obst['y']),
+                        obst['largura'], obst['altura'],
+                        linewidth=1, edgecolor='black', facecolor='#FF9999', alpha=0.7
+                    ))
+                for rec in self.ambiente.recursos:
+                    if not rec['coletado']:
+                        self.ax.add_patch(patches.Circle(
+                            (rec['x'], rec['y']), 10,
+                            linewidth=1, edgecolor='black', facecolor='#99FF99', alpha=0.8
+                        ))
+                self.ax.add_patch(patches.Circle(
                     (self.ambiente.meta['x'], self.ambiente.meta['y']),
                     self.ambiente.meta['raio'],
-                    linewidth=2,
-                    edgecolor='black',
-                    facecolor='#FFFF00',  # Amarelo
-                    alpha=0.8
-                )
-                self.ax.add_patch(meta_circ)
-                
-                # Desenhar robô
+                    linewidth=2, edgecolor='black', facecolor='#FFFF00', alpha=0.8
+                ))
+
+                # Desenhar robô e direção
                 robo_circ = patches.Circle(
-                    (self.robo.x, self.robo.y),
-                    self.robo.raio,
-                    linewidth=1,
-                    edgecolor='black',
-                    facecolor='#9999FF',
-                    alpha=0.8
+                    (self.robo.x, self.robo.y), self.robo.raio,
+                    linewidth=1, edgecolor='black', facecolor='#9999FF', alpha=0.8
                 )
                 self.ax.add_patch(robo_circ)
-                
-                # Desenhar direção do robô
                 direcao_x = self.robo.x + self.robo.raio * np.cos(self.robo.angulo)
                 direcao_y = self.robo.y + self.robo.raio * np.sin(self.robo.angulo)
                 self.ax.plot([self.robo.x, direcao_x], [self.robo.y, direcao_y], 'r-', linewidth=2)
-                
-                # Adicionar informações
+
+                # Atualizar texto de info
                 info_text = self.ax.text(
-                    10, self.ambiente.altura - 50,  # Alterado de 10 para 50 para descer a legenda
+                    10, self.ambiente.altura - 50,
                     f"Tempo: {self.ambiente.tempo}\n"
                     f"Recursos: {self.robo.recursos_coletados}\n"
                     f"Energia: {self.robo.energia:.1f}\n"
@@ -659,24 +498,26 @@ class Simulador:
                     fontsize=12,
                     bbox=dict(facecolor='white', alpha=0.8, edgecolor='gray', boxstyle='round,pad=0.5')
                 )
-                
-                # Atualizar a figura
+
                 plt.draw()
                 plt.pause(0.05)
-                
-                # Verificar fim da simulação
-                if sem_energia or self.ambiente.passo():
+
+                # Verificar fim da simulação:
+                # - sem energia
+                # - tempo esgotado
+                # - recursos zerados e meta atingida
+                if sem_energia or self.ambiente.passo() or (
+                    sensores['recursos_restantes'] == 0 and self.robo.meta_atingida):
                     break
-            
-            # Manter a figura aberta até que o usuário a feche
+
             plt.ioff()
             plt.show()
-            
+
         except KeyboardInterrupt:
             plt.close('all')
-        
+
         return self.frames
-    
+
     def animar(self):
         # Desativar o modo interativo antes de criar a animação
         plt.ioff()
