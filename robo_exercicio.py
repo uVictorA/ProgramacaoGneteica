@@ -543,7 +543,7 @@ class Simulador:
 # Deve modificar os parâmetros e a lógica para melhorar o desempenho.
 # =====================================================================
 
-class IndividuoPG:
+class IndividuoPG: 
     def __init__(self, profundidade=3):
         self.profundidade = profundidade
         self.arvore_aceleracao = self.criar_arvore_aleatoria()
@@ -743,7 +743,259 @@ class IndividuoPG:
         # fallback
         return 0
        
-	
+   
+    def mutacao(self, probabilidade=0.1):
+        # PROBABILIDADE DE MUTAÇÃO PARA O ALUNO MODIFICAR
+        self.mutacao_no(self.arvore_aceleracao, probabilidade)
+        self.mutacao_no(self.arvore_rotacao, probabilidade)
+    
+    def mutacao_no(self, no, probabilidade):
+        # 0) se não houver nó, nada a fazer
+        if no is None:
+            return
+
+        # 1) mutação do próprio nó
+        if random.random() < probabilidade:
+            # se for folha, altera valor ou variável
+            if no.get('tipo') == 'folha':
+                if 'valor' in no:
+                    no['valor'] = random.uniform(-5, 5)
+                else:
+                    no['variavel'] = random.choice([
+                        'dist_recurso', 'dist_obstaculo', 'dist_meta',
+                        'angulo_recurso', 'angulo_meta',
+                        'energia', 'velocidade', 'meta_atingida',
+                        'tempo_parado', 'recursos_restantes',
+                        'direcao_meta_x', 'direcao_meta_y'
+                    ])
+            # se for operador simples, troca operador
+            elif no.get('tipo') == 'operador':
+                no['operador'] = random.choice([
+                    '+', '-', '*', '/', 'max', 'min',
+                    'abs', 'if_positivo', 'if_negativo'
+                ])
+
+        # 2) recursão apenas se for operador
+        if no.get('tipo') == 'operador':
+            # caso especial: if_then_else tem ramo then/else
+            if no['operador'] == 'if_then_else':
+                self.mutacao_no(no['esquerda'], probabilidade)
+                self.mutacao_no(no['direita']['then'], probabilidade)
+                self.mutacao_no(no['direita']['else'], probabilidade)
+            else:
+                # operadores unários (abs, not) ou binários comuns
+                self.mutacao_no(no.get('esquerda'), probabilidade)
+                # para unário, direita será None; para goto_meta/binaries, pode haver
+                if no.get('direita') is not None:
+                    self.mutacao_no(no.get('direita'), probabilidade)
+    
+    def crossover(self, outro):
+        filho = IndividuoPG(self.profundidade)
+        # faz subtree crossover em aceleração e rotação
+        filho.arvore_aceleracao = self.crossover_no(self.arvore_aceleracao, outro.arvore_aceleracao)
+        filho.arvore_rotacao    = self.crossover_no(self.arvore_rotacao,    outro.arvore_rotacao)
+        return filho
+    
+    def crossover_no(self, no1, no2, p_corte: float = 0.1):
+        """
+        Faz crossover entre duas subárvores no1 e no2:
+        1) Com probabilidade p_corte, copia no2 inteiro;
+        2) Se qualquer um não for um nó operador válido, devolve cópia de no1 (leaf);
+        3) Caso contrário, despacha para unários, ternário ou binários.
+        """
+        # 1) troca inteira de subárvore
+        if random.random() < p_corte:
+            return copy.deepcopy(no2)
+
+        # 2) se não for nó operador (ou faltar campos), devolve leaf de no1
+        if not (isinstance(no1, dict) and no1.get('tipo') == 'operador'):
+            return copy.deepcopy(no1)
+        if not (isinstance(no2, dict) and no2.get('tipo') == 'operador'):
+            return copy.deepcopy(no1)
+
+        op = no1['operador']
+
+        # 3) operadores unários
+        if op in ('abs', 'not'):
+            return {
+                'tipo': 'operador',
+                'operador': op,
+                'esquerda':   self.crossover_no(no1.get('esquerda'), no2.get('esquerda'), p_corte),
+                'direita':    None
+            }
+
+        # 4) ternário if_then_else
+        if op == 'if_then_else':
+            # extrai com segurança os ramos de no2
+            b2 = no2.get('direita') or {}
+            then2 = b2.get('then')
+            else2 = b2.get('else')
+            return {
+                'tipo': 'operador',
+                'operador': 'if_then_else',
+                'esquerda': self.crossover_no(no1.get('esquerda'), no2.get('esquerda'), p_corte),
+                'direita':  {
+                    'then': self.crossover_no(no1['direita']['then'], then2, p_corte),
+                    'else': self.crossover_no(no1['direita']['else'], else2, p_corte)
+                }
+            }
+
+        # 5) binários comuns (+, -, *, /, max, min, and, or, if_positivo, if_negativo, goto_meta)
+        return {
+            'tipo': 'operador',
+            'operador': op,
+            'esquerda':  self.crossover_no(no1.get('esquerda'), no2.get('esquerda'), p_corte),
+            'direita':   self.crossover_no(no1.get('direita'),  no2.get('direita'),  p_corte)
+        }
+    
+    def salvar(self, arquivo):
+        with open(arquivo, 'w') as f:
+            json.dump({
+                'arvore_aceleracao': self.arvore_aceleracao,
+                'arvore_rotacao': self.arvore_rotacao
+            }, f)
+    
+    @classmethod
+    def carregar(cls, arquivo):
+        with open(arquivo, 'r') as f:
+            dados = json.load(f)
+            individuo = cls()
+            individuo.arvore_aceleracao = dados['arvore_aceleracao']
+            individuo.arvore_rotacao = dados['arvore_rotacao']
+            return individuo
+
+class ProgramacaoGenetica:
+    def __init__(self,
+                 tamanho_populacao: int = 50,
+                 profundidade: int = 3,
+                 metodo_selecao: str = 'torneio',
+                 elite_size: float = 1):
+        self.tamanho_populacao = tamanho_populacao
+        self.profundidade      = profundidade
+        self.metodo_selecao    = metodo_selecao
+        self.elite_size        = elite_size
+        self.populacao         = [IndividuoPG(profundidade)
+                                  for _ in range(tamanho_populacao)]
+        self.melhor_individuo  = None
+        self.melhor_fitness    = float('-inf')
+
+        # estatísticas
+        self.historico_fitness = []
+        self.media_fitness     = []
+        self.std_fitness       = []
+        self.diversidade       = []
+    
+    def avaliar_populacao(self):
+        ambiente = Ambiente()
+        robo = Robo(ambiente.largura // 2, ambiente.altura // 2)
+        fitness_vals = []
+
+        # Parâmetros de reward shaping
+        peso_recursos    = 200.0
+        peso_tempo       = -1.0
+        peso_proximidade = 10.0
+        penalidade_loop  = 50.0
+        limiar_loop      = 50.0  # distância em pixels
+
+        for individuo in self.populacao:
+            total_fitness = 0.0
+
+            for _ in range(5):
+                ambiente.reset()
+                robo.reset(ambiente.largura // 2, ambiente.altura // 2)
+
+                # Inicializa potencial Φ(s₀)
+                prev_potencial = -sum(
+                    np.hypot(robo.x - r['x'], robo.y - r['y'])
+                    for r in ambiente.recursos if not r['coletado']
+                )
+                recursos_antes = 0
+                dist_antes     = 0.0
+
+                # Loop da simulação
+                while True:
+                    sensores = robo.get_sensores(ambiente)
+                    resultado = individuo.avaliar(sensores, 'aceleracao')
+                    if isinstance(resultado, tuple):
+                        a, r = resultado
+                    else:
+                        a = resultado
+                        # substitui o desempacotamento direto por um check de tupla
+                        resultado_r = individuo.avaliar(sensores, 'rotacao')
+                        if isinstance(resultado_r, tuple):
+                            _, r = resultado_r
+                        else:
+                            r = resultado_r
+
+                    # Clamp
+                    a = max(-1, min(1, a))
+                    r = max(-0.5, min(0.5, r))
+
+                    sem_energia = robo.mover(a, r, ambiente)
+
+                    # 1) Recompensa imediata por coleta
+                    delta_recursos = robo.recursos_coletados - recursos_antes
+                    if delta_recursos > 0:
+                        total_fitness += delta_recursos * peso_recursos
+                    recursos_antes = robo.recursos_coletados
+
+                    # 2) Reward de aproximação (potencial Φ)
+                    curr_potencial = -sum(
+                        np.hypot(robo.x - rec['x'], robo.y - rec['y'])
+                        for rec in ambiente.recursos if not rec['coletado']
+                    )
+                    total_fitness += (curr_potencial - prev_potencial) * peso_proximidade
+                    prev_potencial = curr_potencial
+
+                    # 3) Penalidade de looping sem coleta significativa
+                    dist_percorrida = robo.distancia_percorrida - dist_antes
+                    if delta_recursos == 0 and dist_percorrida > limiar_loop:
+                        total_fitness -= penalidade_loop
+                        dist_antes = robo.distancia_percorrida
+
+                    # 4) Penalidade de tempo (passo a passo)
+                    total_fitness += peso_tempo
+
+                    if sem_energia or ambiente.passo():
+                        break
+
+                # 5) Bônus final por atingir a meta
+                if robo.meta_atingida:
+                    total_fitness += 500
+
+            # Fitness médio sobre os 5 episódios
+            individuo.fitness = total_fitness / 5.0
+            fitness_vals.append(individuo.fitness)
+
+        # Estatísticas da população
+        media = float(np.mean(fitness_vals))
+        std   = float(np.std(fitness_vals))
+
+        # Diversidade estrutural
+        serials = [
+            json.dumps(ind.arvore_aceleracao) + json.dumps(ind.arvore_rotacao)
+            for ind in self.populacao
+        ]
+        divers_list = []
+        for i, s1 in enumerate(serials):
+            sims = [
+                difflib.SequenceMatcher(None, s1, s2).ratio()
+                for j, s2 in enumerate(serials) if i != j
+            ]
+            divers_list.append(1.0 - np.mean(sims) if sims else 0.0)
+        diversidade_media = float(np.mean(divers_list))
+
+        # Atualiza históricos
+        self.historico_fitness.append(float(max(fitness_vals)))
+        self.media_fitness.append(media)
+        self.std_fitness.append(std)
+        self.diversidade.append(diversidade_media)
+
+        # Atualiza melhor indivíduo
+        best_idx = int(np.argmax(fitness_vals))
+        self.melhor_individuo = self.populacao[best_idx]
+        self.melhor_fitness   = fitness_vals[best_idx]
+
     def selecionar_roleta(self):
         total_fit = sum(ind.fitness for ind in self.populacao)
         selecionados = []
