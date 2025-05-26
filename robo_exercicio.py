@@ -6,6 +6,8 @@ import matplotlib.animation as animation
 import json
 import time
 import math
+import difflib
+import copy
 
 # =====================================================================
 # PARTE 1: ESTRUTURA DA SIMULAÇÃO (NÃO MODIFICAR)
@@ -20,9 +22,9 @@ class Ambiente:
         self.obstaculos = self.gerar_obstaculos(num_obstaculos)
         self.recursos = self.gerar_recursos(num_recursos)
         self.tempo = 0
-        self.max_tempo = 1000  # Tempo máximo de simulação
-        self.meta = self.gerar_meta()  # Adicionando a meta
-        self.meta_atingida = False  # Flag para controlar se a meta foi atingida
+        self.max_tempo = 1000
+        self.meta = self.gerar_meta()
+        self.meta_atingida = False
     
     def gerar_obstaculos(self, num_obstaculos):
         obstaculos = []
@@ -66,7 +68,7 @@ class Ambiente:
                 # Calcular a distância até o obstáculo mais próximo
                 dist_x = max(obstaculo['x'] - x, 0, x - (obstaculo['x'] + obstaculo['largura']))
                 dist_y = max(obstaculo['y'] - y, 0, y - (obstaculo['y'] + obstaculo['altura']))
-                dist = math.hypot(dist_x, dist_y)
+                dist = np.sqrt(dist_x**2 + dist_y**2)
                 
                 if dist < 50:  # 50 pixels de margem extra
                     posicao_segura = False
@@ -105,7 +107,7 @@ class Ambiente:
         recursos_coletados = 0
         for recurso in self.recursos:
             if not recurso['coletado']:
-                distancia = math.hypot(x - recurso['x'], y - recurso['y'])
+                distancia = np.sqrt((x - recurso['x'])**2 + (y - recurso['y'])**2)
                 if distancia < raio + 10:  # 10 é o raio do recurso
                     recurso['coletado'] = True
                     recursos_coletados += 1
@@ -113,7 +115,7 @@ class Ambiente:
     
     def verificar_atingir_meta(self, x, y, raio):
         if not self.meta_atingida:
-            distancia = math.hypot(x - self.meta['x'], y - self.meta['y'])
+            distancia = distancia = np.sqrt((x - self.meta['x'])**2 + (y - self.meta['y'])**2)
             if distancia < raio + self.meta['raio']:
                 self.meta_atingida = True
                 return True
@@ -153,7 +155,7 @@ class Ambiente:
                 # Calcular a distância até o obstáculo mais próximo
                 dist_x = max(obstaculo['x'] - x, 0, x - (obstaculo['x'] + obstaculo['largura']))
                 dist_y = max(obstaculo['y'] - y, 0, y - (obstaculo['y'] + obstaculo['altura']))
-                dist = math.hypot(dist_x, dist_y)
+                dist = dist = np.sqrt(dist_x**2 + dist_y**2)
                 
                 if dist < raio_robo + 20:  # 20 pixels de margem extra
                     posicao_segura = False
@@ -170,18 +172,17 @@ class Robo:
         self.x = x
         self.y = y
         self.raio = raio
-        self.angulo = 0  # em radianos
+        self.angulo = 0
         self.velocidade = 0
-        self.velocidade_max = 5  # Nova constante para velocidade máxima
         self.energia = 100
         self.recursos_coletados = 0
         self.colisoes = 0
         self.distancia_percorrida = 0
-        self.tempo_parado = 0  # Novo: contador de tempo parado
-        self.ultima_posicao = (x, y)  # Novo: última posição conhecida
-        self.meta_atingida = False  # Novo: flag para controlar se a meta foi atingida
-        self.passos_desde_coleta = 0  # Novo atributo
-        self.ambiente = None  # Novo atributo para referência ao ambiente
+        self.tempo_parado = 0
+        self.ultima_posicao = (x, y)
+        self.meta_atingida = False
+        # Novo: contador de passos desde a última coleta
+        self.passos_desde_coleta = 0
     
     def reset(self, x, y):
         self.x = x
@@ -195,66 +196,82 @@ class Robo:
         self.tempo_parado = 0
         self.ultima_posicao = (x, y)
         self.meta_atingida = False
-        self.passos_desde_coleta = 0  # Reset do novo atributo
+        # Reseta o contador
+        self.passos_desde_coleta = 0
     
     def mover(self, aceleracao, rotacao, ambiente):
-        # Atualizar ângulo
+        # 1) Atualiza ângulo e aceleração forçada se parado
         self.angulo += rotacao
-        
-        # Verificar se o robô está parado
-        distancia_movimento = math.hypot(self.x - self.ultima_posicao[0], self.y - self.ultima_posicao[1])
-        if distancia_movimento < 0.1:  # Se moveu menos de 0.1 unidades
+        dx = self.x - self.ultima_posicao[0]
+        dy = self.y - self.ultima_posicao[1]
+        if math.hypot(dx, dy) < 0.1:
             self.tempo_parado += 1
-            # Forçar movimento após ficar parado por muito tempo
-            if self.tempo_parado > 5:  # Após 5 passos parado
-                aceleracao = max(0.2, aceleracao)  # Força aceleração mínima
-                rotacao = random.uniform(-0.2, 0.2)  # Pequena rotação aleatória
+            if self.tempo_parado > 5:
+                aceleracao = max(0.2, aceleracao)
+                rotacao   = random.uniform(-0.2, 0.2)
         else:
             self.tempo_parado = 0
-        
-        # Atualizar velocidade
-        self.velocidade += aceleracao
-        self.velocidade = max(0.1, min(5, self.velocidade))  # Velocidade mínima de 0.1
-        
-        # Calcular nova posição
-        novo_x = self.x + self.velocidade * np.cos(self.angulo)
-        novo_y = self.y + self.velocidade * np.sin(self.angulo)
-        
-        # Verificar colisão
+
+        # 2) Atualiza velocidade e calcula novo ponto
+        self.velocidade = max(0.1, min(5, self.velocidade + aceleracao))
+        novo_x = self.x + self.velocidade * math.cos(self.angulo)
+        novo_y = self.y + self.velocidade * math.sin(self.angulo)
+
+        # 3) Testa colisão
         if ambiente.verificar_colisao(novo_x, novo_y, self.raio):
             self.colisoes += 1
-            self.velocidade = 0.1  # Mantém velocidade mínima mesmo após colisão
-            # Tenta uma direção diferente após colisão
-            self.angulo += random.uniform(-np.pi/4, np.pi/4)
+            self.velocidade = 0.1
+
+            # ==== LÓGICA DE DESVIO DE OBSTÁCULO OU BORDA ====
+            mais_prox = None
+            menor_dist = float('inf')
+            for obs in ambiente.obstaculos:
+                cx = obs['x'] + obs['largura']/2
+                cy = obs['y'] + obs['altura']/2
+                d = math.hypot(self.x - cx, self.y - cy)
+                if d < menor_dist:
+                    menor_dist = d
+                    mais_prox = (cx, cy)
+
+            if mais_prox is not None and menor_dist < float('inf'):
+                cx, cy = mais_prox
+                dx_obs = self.x - cx
+                dy_obs = self.y - cy
+                ang_avoid = math.atan2(dy_obs, dx_obs)
+                self.angulo = ang_avoid
+            else:
+                # colisão de borda: inverte direção e dá um pequeno giro aleatório
+                self.angulo += math.pi + random.uniform(-0.3, 0.3)
+            # ================================================
+
         else:
-            # Atualizar posição
+            # sem colisão, efetua o movimento
             self.distancia_percorrida += math.hypot(novo_x - self.x, novo_y - self.y)
-            self.x = novo_x
-            self.y = novo_y
-        
-        # Atualizar última posição conhecida
+            self.x, self.y = novo_x, novo_y
+
         self.ultima_posicao = (self.x, self.y)
-        
-        # Verificar coleta de recursos
-        recursos_coletados = ambiente.verificar_coleta_recursos(self.x, self.y, self.raio)
-        self.recursos_coletados += recursos_coletados
-        
-        # Verificar se atingiu a meta
+
+        # 4) Coleta recursos e atualiza energia
+        coletados_agora = ambiente.verificar_coleta_recursos(self.x, self.y, self.raio)
+        self.recursos_coletados += coletados_agora
+
+        if coletados_agora > 0:
+            self.passos_desde_coleta = 0
+        else:
+            self.passos_desde_coleta += 1
+
+        # 5) Verifica meta e consome/recupera energia
         if not self.meta_atingida and ambiente.verificar_atingir_meta(self.x, self.y, self.raio):
             self.meta_atingida = True
-            # Recuperar energia ao atingir a meta
             self.energia = min(100, self.energia + 50)
-        
-        # Consumir energia
+
         self.energia -= 0.1 + 0.05 * self.velocidade + 0.1 * abs(rotacao)
         self.energia = max(0, self.energia)
-        
-        # Recuperar energia ao coletar recursos
-        if recursos_coletados > 0:
-            self.energia = min(100, self.energia + 20 * recursos_coletados)
-        
-        return self.energia <= 0
+        if coletados_agora > 0:
+            self.energia = min(100, self.energia + 20 * coletados_agora)
 
+        return self.energia <= 0
+    
     def mover_novo(self, aceleracao, rotacao, ambiente):
         self.velocidade += aceleracao
         self.velocidade = max(min(self.velocidade, self.velocidade_max), -self.velocidade_max)
