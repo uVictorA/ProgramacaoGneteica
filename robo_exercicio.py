@@ -793,7 +793,7 @@ class IndividuoPG:
         arvore = self.arvore_aceleracao if tipo == 'aceleracao' else self.arvore_rotacao
         return self.avaliar_no(arvore, sensores)
     
-    def avaliar_no(self, no, sensores):
+   def avaliar_no(self, no, sensores):
         # caso base
         if no is None or not isinstance(no, dict) or 'tipo' not in no:
             return 0
@@ -1007,66 +1007,136 @@ class IndividuoPG:
             return individuo
 
 class ProgramacaoGenetica:
-    def __init__(self, tamanho_populacao=50, profundidade=3):
-        # PARÂMETROS PARA O ALUNO MODIFICAR
+    def __init__(self,
+                 tamanho_populacao: int = 50,
+                 profundidade: int = 3,
+                 metodo_selecao: str = 'torneio',
+                 elite_size: float = 1):
         self.tamanho_populacao = tamanho_populacao
-        self.profundidade = profundidade
-        self.populacao = [IndividuoPG(profundidade) for _ in range(tamanho_populacao)]
-        self.melhor_individuo = None
-        self.melhor_fitness = float('-inf')
+        self.profundidade      = profundidade
+        self.metodo_selecao    = metodo_selecao
+        self.elite_size        = elite_size
+        self.populacao         = [IndividuoPG(profundidade)
+                                  for _ in range(tamanho_populacao)]
+        self.melhor_individuo  = None
+        self.melhor_fitness    = float('-inf')
+
+        # estatísticas
         self.historico_fitness = []
+        self.media_fitness     = []
+        self.std_fitness       = []
+        self.diversidade       = []
     
     def avaliar_populacao(self):
         ambiente = Ambiente()
         robo = Robo(ambiente.largura // 2, ambiente.altura // 2)
-        
+        fitness_vals = []
+
+        # Parâmetros de reward shaping
+        peso_recursos    = 200.0
+        peso_tempo       = -1.0
+        peso_proximidade = 10.0
+        penalidade_loop  = 50.0
+        limiar_loop      = 50.0  # distância em pixels
+
         for individuo in self.populacao:
-            fitness = 0
-            
-            # Simular 5 tentativas
+            total_fitness = 0.0
+
             for _ in range(5):
                 ambiente.reset()
                 robo.reset(ambiente.largura // 2, ambiente.altura // 2)
-                
+
+                # Inicializa potencial Φ(s₀)
+                prev_potencial = -sum(
+                    np.hypot(robo.x - r['x'], robo.y - r['y'])
+                    for r in ambiente.recursos if not r['coletado']
+                )
+                recursos_antes = 0
+                dist_antes     = 0.0
+
+                # Loop da simulação
                 while True:
-                    # Obter sensores
                     sensores = robo.get_sensores(ambiente)
-                    
-                    # Avaliar árvores de decisão
-                    aceleracao = individuo.avaliar(sensores, 'aceleracao')
-                    rotacao = individuo.avaliar(sensores, 'rotacao')
-                    
-                    # Limitar valores
-                    aceleracao = max(-1, min(1, aceleracao))
-                    rotacao = max(-0.5, min(0.5, rotacao))
-                    
-                    # Mover robô
-                    sem_energia = robo.mover(aceleracao, rotacao, ambiente)
-                    
-                    # Verificar fim da simulação
+                    resultado = individuo.avaliar(sensores, 'aceleracao')
+                    if isinstance(resultado, tuple):
+                        a, r = resultado
+                    else:
+                        a = resultado
+                        # substitui o desempacotamento direto por um check de tupla
+                        resultado_r = individuo.avaliar(sensores, 'rotacao')
+                        if isinstance(resultado_r, tuple):
+                            _, r = resultado_r
+                        else:
+                            r = resultado_r
+
+                    # Clamp
+                    a = max(-1, min(1, a))
+                    r = max(-0.5, min(0.5, r))
+
+                    sem_energia = robo.mover(a, r, ambiente)
+
+                    # 1) Recompensa imediata por coleta
+                    delta_recursos = robo.recursos_coletados - recursos_antes
+                    if delta_recursos > 0:
+                        total_fitness += delta_recursos * peso_recursos
+                    recursos_antes = robo.recursos_coletados
+
+                    # 2) Reward de aproximação (potencial Φ)
+                    curr_potencial = -sum(
+                        np.hypot(robo.x - rec['x'], robo.y - rec['y'])
+                        for rec in ambiente.recursos if not rec['coletado']
+                    )
+                    total_fitness += (curr_potencial - prev_potencial) * peso_proximidade
+                    prev_potencial = curr_potencial
+
+                    # 3) Penalidade de looping sem coleta significativa
+                    dist_percorrida = robo.distancia_percorrida - dist_antes
+                    if delta_recursos == 0 and dist_percorrida > limiar_loop:
+                        total_fitness -= penalidade_loop
+                        dist_antes = robo.distancia_percorrida
+
+                    # 4) Penalidade de tempo (passo a passo)
+                    total_fitness += peso_tempo
+
                     if sem_energia or ambiente.passo():
                         break
-                
-                # Calcular fitness
-                fitness_tentativa = (
-                    robo.recursos_coletados * 100 +  # Pontos por recursos coletados
-                    robo.distancia_percorrida * 0.1 -  # Pontos por distância percorrida
-                    robo.colisoes * 50 -  # Penalidade por colisões
-                    (100 - robo.energia) * 0.5  # Penalidade por consumo de energia
-                )
-                
-                # Adicionar pontos extras por atingir a meta
+
+                # 5) Bônus final por atingir a meta
                 if robo.meta_atingida:
-                    fitness_tentativa += 500  # Pontos extras por atingir a meta
-                
-                fitness += max(0, fitness_tentativa)
-            
-            individuo.fitness = fitness / 5  # Média das 5 tentativas
-            
-            # Atualizar melhor indivíduo
-            if individuo.fitness > self.melhor_fitness:
-                self.melhor_fitness = individuo.fitness
-                self.melhor_individuo = individuo
+                    total_fitness += 500
+
+            # Fitness médio sobre os 5 episódios
+            individuo.fitness = total_fitness / 5.0
+            fitness_vals.append(individuo.fitness)
+
+        # Estatísticas da população
+        media = float(np.mean(fitness_vals))
+        std   = float(np.std(fitness_vals))
+
+        # Diversidade estrutural
+        serials = [
+            json.dumps(ind.arvore_aceleracao) + json.dumps(ind.arvore_rotacao)
+            for ind in self.populacao
+        ]
+        divers_list = []
+        for i, s1 in enumerate(serials):
+            sims = [
+                difflib.SequenceMatcher(None, s1, s2).ratio()
+                for j, s2 in enumerate(serials) if i != j
+            ]
+            divers_list.append(1.0 - np.mean(sims) if sims else 0.0)
+        diversidade_media = float(np.mean(divers_list))
+
+        # Atualiza históricos
+        self.historico_fitness.append(float(max(fitness_vals)))
+        self.media_fitness.append(media)
+        self.std_fitness.append(std)
+        self.diversidade.append(diversidade_media)
+
+        # Atualiza melhor indivíduo
+        best_idx = int(np.argmax(fitness_vals))
+        self.melhor_individuo = self.populacao[best_idx]
+        self.melhor_fitness   = fitness_vals[best_idx]
     
     def selecionar(self):
         # MÉTODO DE SELEÇÃO PARA O ALUNO MODIFICAR
